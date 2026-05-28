@@ -1,0 +1,65 @@
+# Binaries
+*.bin
+*.exe
+*.exe~
+*.dll
+*.lib
+*.so
+*.dylib
+/bin/
+
+# Linting
+.ruff_cache
+golangci-lint*
+gosec*
+
+# OS generated files
+.DS_Store
+.DS_Store?
+ehthumbs.db
+Icon?
+Thumbs.db
+*.swp
+*.swo
+
+# Languages
+vendor/
+__pycache__/
+
+# Secrets and environment
+.env
+*.key
+*.env
+*.crt
+*.pem
+*.p12
+*.gpg
+*.secret
+secrets/
+
+# Transient
+*.out
+*.tmp
+*.test
+*.log
+tmp/
+out/
+log/
+
+# Data
+*.db
+
+# Backup files (sequences)
+*.bk??
+
+# Build files
+.editorconfig
+.windsurf
+RULES.md
+GEMINI.md
+CLAUDE.md
+JULES.md
+SKILLS.md
+walkthrough.md
+implementation_plan.md
+code_review_report.md
