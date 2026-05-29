@@ -18,7 +18,7 @@
 //   - Detection Path:
 //     CLI Flag (-detectdb) -> DetectDB() -> Parse Binary Magic -> Print DBInfo JSON -> os.Stdout
 //   - Backup Orchestration Path:
-//     CLI Flag (-backup) -> DetectDB() -> Validate DBType -> Parse Paths & Base Names -> Suffix
+//     CLI Flag (-backup-type) -> DetectDB() -> Validate DBType -> Parse Paths & Base Names -> Suffix
 //     Generation -> Loop Modes -> Build backupFunc closure -> CreateTarZstdArchive() -> printJSONResults() -> os.Stdout
 package main
 
@@ -39,7 +39,7 @@ func main() {
 	// Define CLI Flags
 	showVersion := flag.Bool("version", false, "Print version information and exit")
 	detectdb := flag.Bool("detectdb", false, "Detect type and metadata of the database")
-	backupOpt := flag.String("backup", "", "Backup option: db, json, or json,db")
+	backupTypeOpt := flag.String("backup-type", "", "Backup type: db, json, or json,db")
 	sourcedbPath := flag.String("sourcedb-path", "", "Path to the active source database")
 	targetdataPath := flag.String("targetdata-path", "", "Path to the backup target folder")
 
@@ -70,7 +70,7 @@ func main() {
 	}
 
 	// 2. Backup Mode Execution
-	if *backupOpt != "" {
+	if *backupTypeOpt != "" {
 		if *sourcedbPath == "" {
 			printErrorAndExit("Missing required flag: -sourcedb-path", 1)
 		}
@@ -103,7 +103,7 @@ func main() {
 		// Generate YYYYMMDDHHMMSS timestamp
 		timestamp := time.Now().Format("20060102150405")
 
-		modes := strings.Split(*backupOpt, ",")
+		modes := strings.Split(*backupTypeOpt, ",")
 		var results []*BackupResult
 
 		for _, mode := range modes {
@@ -127,11 +127,11 @@ func main() {
 				switch info.DBType {
 				case "sqlite3":
 					backupFunc = func(w io.Writer) error {
-						return BackupSQLiteDB(*sourcedbPath, w)
+						return BackupSQLiteDB(*sourcedbPath, *targetdataPath, w)
 					}
 				case "boldb":
 					backupFunc = func(w io.Writer) error {
-						return BackupBoltDB(*sourcedbPath, w)
+						return BackupBoltDB(*sourcedbPath, *targetdataPath, w)
 					}
 				default:
 					printErrorAndExit(fmt.Sprintf("Unsupported DB type for backup: %s", info.DBType), 1)
@@ -140,11 +140,11 @@ func main() {
 				switch info.DBType {
 				case "sqlite3":
 					backupFunc = func(w io.Writer) error {
-						return BackupSQLiteJSON(*sourcedbPath, w)
+						return BackupSQLiteJSON(*sourcedbPath, *targetdataPath, w)
 					}
 				case "boldb":
 					backupFunc = func(w io.Writer) error {
-						return BackupBoltJSON(*sourcedbPath, w)
+						return BackupBoltJSON(*sourcedbPath, *targetdataPath, w)
 					}
 				default:
 					printErrorAndExit(fmt.Sprintf("Unsupported DB type for backup: %s", info.DBType), 1)

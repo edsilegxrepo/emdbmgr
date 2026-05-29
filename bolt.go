@@ -28,21 +28,105 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"time"
 	"unicode/utf8"
 
 	bolt "go.etcd.io/bbolt"
 )
 
-// BackupBoltDB copies the active BoltDB database to w using a consistent read-only transaction
-func BackupBoltDB(srcPath string, w io.Writer) error {
-	// Open database in shared read-only mode
-	db, err := bolt.Open(srcPath, 0o666, &bolt.Options{ReadOnly: true, Timeout: 5 * time.Second})
+// openBoltDBWithFallback attempts to open BoltDB directly in read-only mode.
+// If it fails (due to locking/timeout), it copies the database to a temporary file in targetDir,
+// opens it there, and returns both the DB handle and the temporary path so it can be cleaned up later.
+func openBoltDBWithFallback(srcPath, targetDir string) (*bolt.DB, string, error) {
+	// First, try opening the database directly in read-only mode with a short timeout.
+	// We use a 1-second timeout here to fail quickly and activate the robust fallback.
+	db, err := bolt.Open(srcPath, 0o666, &bolt.Options{ReadOnly: true, Timeout: 1 * time.Second})
+	if err == nil {
+		return db, "", nil
+	}
+
+	// Fallback path with verification and retry loop (up to 3 attempts)
+	var lastErr error
+	for attempt := 1; attempt <= 3; attempt++ {
+		tempFile, err := os.CreateTemp(targetDir, "emdbmgr_bolt_fallback_*.db")
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to create temporary BoltDB copy: %w", err)
+		}
+		tempPath := tempFile.Name()
+		_ = tempFile.Close()
+
+		if err := copyFile(srcPath, tempPath); err != nil {
+			_ = os.Remove(tempPath)
+			lastErr = fmt.Errorf("failed to copy locked BoltDB file: %w", err)
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+
+		// Verify the copied database integrity using Tx.Check() consistency check
+		if err := verifyBoltDB(tempPath); err != nil {
+			_ = os.Remove(tempPath)
+			lastErr = fmt.Errorf("integrity check failed for copied BoltDB (attempt %d): %w", attempt, err)
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+
+		// Open the verified database copy. Since it is a temporary copy and no other process has it open,
+		// standard bbolt lock acquisition will succeed immediately without any timeouts.
+		db, err = bolt.Open(tempPath, 0o666, &bolt.Options{ReadOnly: true, Timeout: 5 * time.Second})
+		if err != nil {
+			_ = os.Remove(tempPath)
+			lastErr = fmt.Errorf("failed to open verified BoltDB copy: %w", err)
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+
+		return db, tempPath, nil
+	}
+
+	return nil, "", fmt.Errorf("all BoltDB copy attempts failed. Last error: %w", lastErr)
+}
+
+// verifyBoltDB performs consistency checks on a BoltDB database file to detect torn writes/corruption
+func verifyBoltDB(path string) error {
+	db, err := bolt.Open(path, 0o666, &bolt.Options{ReadOnly: true, Timeout: 2 * time.Second})
 	if err != nil {
-		return fmt.Errorf("failed to open BoltDB in read-only mode: %w", err)
+		return fmt.Errorf("failed to open for integrity check: %w", err)
 	}
 	defer func() {
 		_ = db.Close()
+	}()
+
+	var checkErrs []error
+	err = db.View(func(tx *bolt.Tx) error {
+		ch := tx.Check()
+		for err := range ch {
+			if err != nil {
+				checkErrs = append(checkErrs, err)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if len(checkErrs) > 0 {
+		return fmt.Errorf("consistency check failed with %d errors: %v", len(checkErrs), checkErrs[0])
+	}
+	return nil
+}
+
+// BackupBoltDB copies the active BoltDB database to w using a consistent read-only transaction
+func BackupBoltDB(srcPath, targetDir string, w io.Writer) error {
+	db, tempPath, err := openBoltDBWithFallback(srcPath, targetDir)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = db.Close()
+		if tempPath != "" {
+			_ = os.Remove(tempPath)
+		}
 	}()
 
 	// Run a read-only transaction and copy the database pages safely
@@ -58,14 +142,16 @@ func BackupBoltDB(srcPath string, w io.Writer) error {
 }
 
 // BackupBoltJSON dumps the BoltDB as a recursive JSON structure, streaming directly to w
-func BackupBoltJSON(srcPath string, w io.Writer) error {
-	// Open database in shared read-only mode
-	db, err := bolt.Open(srcPath, 0o666, &bolt.Options{ReadOnly: true, Timeout: 5 * time.Second})
+func BackupBoltJSON(srcPath, targetDir string, w io.Writer) error {
+	db, tempPath, err := openBoltDBWithFallback(srcPath, targetDir)
 	if err != nil {
-		return fmt.Errorf("failed to open BoltDB in read-only mode: %w", err)
+		return err
 	}
 	defer func() {
 		_ = db.Close()
+		if tempPath != "" {
+			_ = os.Remove(tempPath)
+		}
 	}()
 
 	// Write JSON header

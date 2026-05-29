@@ -112,6 +112,9 @@ func main() {
 	// 9. Test Active Concurrency & Safety (Test 4)
 	testActiveConcurrency(binPath, sqlitePath, tempDir)
 
+	// 10. Test Locked Database Fallbacks (Test 5)
+	testLockedDatabaseFallbacks(binPath, sqlitePath, boltPath, tempDir)
+
 	fmt.Println("\n--- All Tests Completed Successfully ---")
 }
 
@@ -197,7 +200,7 @@ func testBackup(binPath, dbPath, targetDir string) {
 	// Execute both JSON and DB dual backup mode
 	// #nosec G204
 	// nosemgrep
-	cmd := exec.Command(binPath, "-backup=json,db", "-sourcedb-path", dbPath, "-targetdata-path", targetDir)
+	cmd := exec.Command(binPath, "-backup-type=json,db", "-sourcedb-path", dbPath, "-targetdata-path", targetDir)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -429,7 +432,7 @@ func testActiveConcurrency(binPath, dbPath, tempDir string) {
 	targetDir := filepath.Join(tempDir, "concurrent_run")
 	// #nosec G204
 	// nosemgrep
-	cmd := exec.Command(binPath, "-backup=json,db", "-sourcedb-path", dbPath, "-targetdata-path", targetDir)
+	cmd := exec.Command(binPath, "-backup-type=json,db", "-sourcedb-path", dbPath, "-targetdata-path", targetDir)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -444,4 +447,76 @@ func testActiveConcurrency(binPath, dbPath, tempDir string) {
 	<-doneChan
 
 	fmt.Println("  -> Concurrency test completed successfully. Writers & backup streams executed simultaneously with zero blockages.")
+}
+
+func testLockedDatabaseFallbacks(binPath, sqlitePath, boltPath, tempDir string) {
+	fmt.Println("\n[Test 5] Testing Locked Database Fallbacks...")
+
+	// 1. Lock BoltDB exclusively using a standard bolt.Open connection (simulating SFTPGo)
+	fmt.Println("  -> Acquiring exclusive lock on BoltDB file...")
+	externalBolt, err := bolt.Open(boltPath, 0o666, &bolt.Options{Timeout: 1 * time.Second})
+	if err != nil {
+		panic(fmt.Errorf("failed to lock BoltDB for testing: %w", err))
+	}
+	defer externalBolt.Close()
+
+	// 2. Lock SQLite exclusively by opening a transaction with EXCLUSIVE locking mode
+	fmt.Println("  -> Acquiring exclusive lock on SQLite file...")
+	externalSQL, err := sql.Open("sqlite", sqlitePath)
+	if err != nil {
+		panic(fmt.Errorf("failed to open SQLite for testing: %w", err))
+	}
+	defer externalSQL.Close()
+
+	_, err = externalSQL.Exec("PRAGMA locking_mode=EXCLUSIVE")
+	if err != nil {
+		panic(fmt.Errorf("failed to set exclusive locking mode: %w", err))
+	}
+	sqlTx, err := externalSQL.Begin()
+	if err != nil {
+		panic(fmt.Errorf("failed to begin exclusive SQL transaction: %w", err))
+	}
+	defer func() {
+		_ = sqlTx.Rollback()
+	}()
+
+	// 3. Trigger dual backup on BoltDB while it is locked exclusively
+	boltTargetDir := filepath.Join(tempDir, "bolt_locked_backup")
+	if err := os.MkdirAll(boltTargetDir, 0o755); err != nil {
+		panic(err)
+	}
+
+	fmt.Println("  -> Executing backup on locked BoltDB...")
+	// #nosec G204
+	// nosemgrep
+	cmdBolt := exec.Command(binPath, "-backup-type=json,db", "-sourcedb-path", boltPath, "-targetdata-path", boltTargetDir)
+	var stdoutBolt, stderrBolt bytes.Buffer
+	cmdBolt.Stdout = &stdoutBolt
+	cmdBolt.Stderr = &stderrBolt
+
+	if err := cmdBolt.Run(); err != nil {
+		fmt.Printf("  -> Locked BoltDB backup failed: %v\nStderr: %s\n", err, stderrBolt.String())
+		panic(err)
+	}
+	fmt.Println("  -> Locked BoltDB backup succeeded via copy fallback!")
+
+	// 4. Trigger dual backup on SQLite while it is locked exclusively
+	sqliteTargetDir := filepath.Join(tempDir, "sqlite_locked_backup")
+	if err := os.MkdirAll(sqliteTargetDir, 0o755); err != nil {
+		panic(err)
+	}
+
+	fmt.Println("  -> Executing backup on locked SQLite...")
+	// #nosec G204
+	// nosemgrep
+	cmdSQL := exec.Command(binPath, "-backup-type=json,db", "-sourcedb-path", sqlitePath, "-targetdata-path", sqliteTargetDir)
+	var stdoutSQL, stderrSQL bytes.Buffer
+	cmdSQL.Stdout = &stdoutSQL
+	cmdSQL.Stderr = &stderrSQL
+
+	if err := cmdSQL.Run(); err != nil {
+		fmt.Printf("  -> Locked SQLite backup failed: %v\nStderr: %s\n", err, stderrSQL.String())
+		panic(err)
+	}
+	fmt.Println("  -> Locked SQLite backup succeeded via copy fallback!")
 }

@@ -142,7 +142,7 @@ func CreateTarZstdArchive(destPath, innerFileName string, dbInfo *DBInfo, backup
 	}()
 
 	// 4. Set up the hybrid spill-to-disk staging buffer
-	hwData, err := NewHybridWriter(32 * 1024 * 1024) // Stage in RAM up to 32 MB
+	hwData, err := NewHybridWriter(dir, 32*1024*1024) // Stage in RAM up to 32 MB
 	if err != nil {
 		return nil, err
 	}
@@ -160,6 +160,19 @@ func CreateTarZstdArchive(destPath, innerFileName string, dbInfo *DBInfo, backup
 	tempReader, err := hwData.Reader()
 	if err != nil {
 		return nil, fmt.Errorf("failed to resolve backup reader: %w", err)
+	}
+
+	// 4.5 Systematically verify the integrity of the backup file before committing it to the tar
+	vReader, err := hwData.Reader()
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve verification reader: %w", err)
+	}
+	ext := "db"
+	if strings.HasSuffix(innerFileName, ".json") {
+		ext = "json"
+	}
+	if err := verifyBackupFile(vReader, dbInfo.DBType, ext, dir); err != nil {
+		return nil, fmt.Errorf("systematic integrity check failed for backup file: %w", err)
 	}
 
 	// Get computed hash
@@ -254,16 +267,95 @@ func CreateTarZstdArchive(destPath, innerFileName string, dbInfo *DBInfo, backup
 	}, nil
 }
 
+// copyFile performs a robust block-level file copy from src to dst.
+// This is used as a fallback strategy when database files are exclusively locked by active services.
+func copyFile(src, dst string) (err error) {
+	// #nosec G304 -- Path is a validated and sanitized source database parameter cleaned using filepath.Clean.
+	in, openErr := os.Open(filepath.Clean(src))
+	if openErr != nil {
+		return openErr
+	}
+	defer func() {
+		_ = in.Close()
+	}()
+
+	// #nosec G304 -- Path is a validated target backup folder staging path cleaned using filepath.Clean.
+	out, createErr := os.Create(filepath.Clean(dst))
+	if createErr != nil {
+		return createErr
+	}
+	defer func() {
+		if closeErr := out.Close(); closeErr != nil && err == nil {
+			err = closeErr
+		}
+	}()
+
+	if _, err = io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Sync()
+}
+
+// verifyBackupFile systematically validates the compiled backup data (SQLite, BoltDB, or JSON)
+// to ensure it is structurally uncorrupted and valid before archiving.
+func verifyBackupFile(tempReader io.Reader, dbType, ext, targetDir string) error {
+	// Create a temporary file inside targetDir for validation
+	vFile, err := os.CreateTemp(targetDir, "emdbmgr_validation_*.tmp")
+	if err != nil {
+		return fmt.Errorf("failed to create validation temp file: %w", err)
+	}
+	vPath := vFile.Name()
+	defer func() {
+		_ = vFile.Close()
+		_ = os.Remove(vPath)
+	}()
+
+	if _, err := io.Copy(vFile, tempReader); err != nil {
+		return fmt.Errorf("failed to write to validation temp file: %w", err)
+	}
+	_ = vFile.Sync()
+
+	// Perform specific validation based on the output format
+	if ext == "json" {
+		if _, err := vFile.Seek(0, io.SeekStart); err != nil {
+			return err
+		}
+		// Stream-decode the JSON to verify syntactic completeness without high RAM overhead
+		dec := json.NewDecoder(vFile)
+		for {
+			_, err := dec.Token()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				return fmt.Errorf("JSON backup contains syntactic corruption: %w", err)
+			}
+		}
+		return nil
+	}
+
+	// Verify database binary structures
+	switch dbType {
+	case "sqlite3":
+		return verifySQLiteDB(vPath)
+	case "boldb":
+		return verifyBoltDB(vPath)
+	}
+	return nil
+}
+
 // HybridWriter stages writes in memory up to maxMemory, then automatically spills to a local temp file.
 type HybridWriter struct {
+	tempDir   string
 	maxMemory int
 	buf       *bytes.Buffer
 	file      *os.File
 	isDisk    bool
 }
 
-func NewHybridWriter(maxMemory int) (*HybridWriter, error) {
+func NewHybridWriter(tempDir string, maxMemory int) (*HybridWriter, error) {
 	return &HybridWriter{
+		tempDir:   tempDir,
 		maxMemory: maxMemory,
 		buf:       new(bytes.Buffer),
 	}, nil
@@ -276,8 +368,8 @@ func (hw *HybridWriter) Write(p []byte) (int, error) {
 	if hw.buf.Len()+len(p) > hw.maxMemory {
 		// Spill over to temporary disk file
 		var err error
-		// #nosec G304 -- Staging scratch file generated securely inside OS temp directory
-		hw.file, err = os.CreateTemp("", "emdbmgr_spill_*.tmp")
+		// #nosec G304 -- Staging scratch file generated securely inside target backup directory
+		hw.file, err = os.CreateTemp(hw.tempDir, "emdbmgr_spill_*.tmp")
 		if err != nil {
 			return 0, fmt.Errorf("failed to create spill-over temp file: %w", err)
 		}
