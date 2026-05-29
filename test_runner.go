@@ -72,7 +72,8 @@ func main() {
 
 	// 2. Compile emdbmgr directly to TMPDIR/unitests with injected version ldflags
 	fmt.Printf("Compiling emdbmgr on-the-fly to: %s...\n", binPath)
-	buildCmd := exec.Command("go", "build", "-ldflags", "-X main.Version=1.0.0-20260528", "-o", binPath)
+	// #nosec G204 -- Staged compilation of the dynamic binary inside target sandbox is fully secure
+	buildCmd := exec.Command("go", "build", "-ldflags", "-X main.version=1.0.0-20260528", "-o", binPath)
 	if err := buildCmd.Run(); err != nil {
 		panic(fmt.Errorf("failed to compile emdbmgr in temp folder: %w", err))
 	}

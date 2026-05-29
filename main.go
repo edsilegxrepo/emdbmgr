@@ -33,7 +33,7 @@ import (
 	"time"
 )
 
-var Version = "development"
+var version = "development"
 
 func main() {
 	// Define CLI Flags
@@ -47,7 +47,7 @@ func main() {
 
 	// 0. Version Flag Check
 	if *showVersion {
-		fmt.Printf("Embedded Database Manager - v%s\n", Version)
+		fmt.Printf("Embedded Database Manager - v%s\n", version)
 		return
 	}
 

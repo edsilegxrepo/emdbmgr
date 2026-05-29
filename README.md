@@ -181,7 +181,7 @@ go build -o emdbmgr.exe
 
 To inject a custom production version string at compile-time (e.g. into your CD build pipeline):
 ```bash
-go build -ldflags "-X main.Version=1.4.2-stable" -o emdbmgr.exe
+go build -ldflags "-X main.version=1.4.2-stable" -o emdbmgr.exe
 ```
 
 ---
@@ -339,7 +339,7 @@ The following verification matrix defines the test cases performed by the test s
 
 | Test Case | Purpose / Scope | Verification Methodology | Acceptance Criteria |
 |---|---|---|---|
-| **Version Verification (Test 0)** | Validate compile-time version injection via Go linker flags. | Compiles the target binary on-the-fly with `-ldflags "-X main.Version=1.0.0-20260528"` and executes `-version`. | Output stdout matches exactly `Embedded Database Manager - v1.0.0-20260528\n` and exits with code 0. |
+| **Version Verification (Test 0)** | Validate compile-time version injection via Go linker flags. | Compiles the target binary on-the-fly with `-ldflags "-X main.version=1.0.0-20260528"` and executes `-version`. | Output stdout matches exactly `Embedded Database Manager - v1.0.0-20260528\n` and exits with code 0. |
 | **SQLite3 Signature Analysis (Test 1)** | Validate raw format identification and metadata extraction from open SQLite databases. | Creates a mock SQLite database, populates standard tables (containing integers, texts, and raw non-UTF-8 binary BLOB blocks), and runs `-detectdb`. | Output matches `sqlite3` and successfully extracts correct `page_size` (4096), `wal_mode` status, schema, and user versions. |
 | **BoltDB Signature Analysis (Test 1)** | Validate page structural offset analysis and host-endian magic word matching. | Creates a mock BoltDB database, populates standard buckets (containing UTF-8 keys and raw non-UTF-8 binary values), and runs `-detectdb`. | Output matches `boldb` and successfully extracts correct `version` (2), `page_size` (4096), `tx_id`, and `page_count` metrics. |
 | **Safe SQLite3 Backup Verification (Test 2)** | Validate transaction-consistent shadow replication and row-by-row streaming JSON serialization for active SQLite. | Triggers a dual backup (`-backup=json,db`) on an open SQLite database, extracts the resulting `.tar.zst` packages, and scans contents. | The database shadow replica and JSON extraction data exist inside the archives, the `metadata.json` is present, and its `data_xxh64` checksum matches the on-the-fly calculated hash. |
