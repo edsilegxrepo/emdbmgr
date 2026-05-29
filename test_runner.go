@@ -39,6 +39,8 @@ import (
 	"archive/tar"
 	"bytes"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -297,6 +299,24 @@ func verifyArchive(archivePath, expectedFileName string) {
 			}
 			metadataContent = buf.String()
 			fmt.Printf("  -> Found expected metadata.json file inside tar. Content:\n%s\n", metadataContent)
+
+			// Assert that the integrity_check field is present and verified is true
+			var parsedMeta struct {
+				IntegrityCheck struct {
+					Verified bool   `json:"verified"`
+					Status   string `json:"status"`
+					Message  string `json:"message"`
+				} `json:"integrity_check"`
+			}
+			if err := json.Unmarshal([]byte(metadataContent), &parsedMeta); err != nil {
+				panic(fmt.Errorf("failed to parse metadata JSON: %w", err))
+			}
+			if !parsedMeta.IntegrityCheck.Verified || parsedMeta.IntegrityCheck.Status != "passed" {
+				panic(fmt.Errorf("metadata integrity check assertions failed: %+v", parsedMeta.IntegrityCheck))
+			}
+			if parsedMeta.IntegrityCheck.Message == "" {
+				panic(errors.New("expected non-empty message in integrity check metadata"))
+			}
 		}
 	}
 

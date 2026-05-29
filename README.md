@@ -481,6 +481,20 @@ In addition to lock-bypassing checks, `emdbmgr` enforces a **Universal, Systemat
 3.  **Strict Commit Guarantee:**
     If any check fails, the tool **immediately aborts the backup**, deletes the temporary staged file from the disk, and returns a formatted JSON error. A corrupted or partially written backup package is **never** archived or saved to disk.
 
+#### Persistent Metadata Auditing:
+To guarantee absolute auditability and operational transparency, the verification result is persisted inside the archive's `metadata.json` file in a dedicated `integrity_check` block:
+
+```json
+"integrity_check": {
+  "verified": true,
+  "status": "passed",
+  "message": "BoltDB database verified: tx.Check() successfully passed B+ Tree consistency checks",
+  "timestamp": "2026-05-28T21:50:41-05:00"
+}
+```
+
+This enables downstream restore scripts, external monitoring tools, and site reliability engineers to instantly verify the structural validity of any backup without needing to perform a full file extraction first.
+
 ### 8.5 Summary
 By decoupling raw file operations from the archive compilation and wrapping them in **mandatory programmatic B+ Tree/SQL page verification**, `emdbmgr` guarantees that **the live production database is never written to (0% risk of live database corruption)**, and **the final backup package is guaranteed to be 100% healthy, verified, and transactionally consistent (0% risk of archiving corrupted backups)**.
 
