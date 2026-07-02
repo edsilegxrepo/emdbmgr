@@ -4,7 +4,7 @@ go 1.26.3
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0
-	github.com/klauspost/compress v1.18.6
+	github.com/klauspost/compress v1.19.0
 	go.etcd.io/bbolt v1.4.3
 	modernc.org/sqlite v1.51.0
 )
