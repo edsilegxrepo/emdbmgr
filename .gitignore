@@ -7,6 +7,7 @@
 *.so
 *.dylib
 /bin/
+/class/
 
 # Linting
 .ruff_cache
@@ -33,18 +34,23 @@ __pycache__/
 *.crt
 *.pem
 *.p12
+*.jks
 *.gpg
 *.secret
 secrets/
+key/
+keys/
 
 # Transient
 *.out
 *.tmp
 *.test
 *.log
+temp/
 tmp/
 out/
 log/
+logs/
 
 # Data
 *.db
@@ -55,6 +61,11 @@ log/
 # Build files
 .editorconfig
 .windsurf
+.antigravity
+.antigravity-cli
+.gemini
+.claude
+AGENTS.md
 RULES.md
 GEMINI.md
 CLAUDE.md
@@ -63,3 +74,4 @@ SKILLS.md
 walkthrough.md
 implementation_plan.md
 code_review_report.md
+tasks.md
