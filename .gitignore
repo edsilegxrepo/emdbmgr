@@ -54,6 +54,10 @@ logs/
 
 # Data
 *.db
+data/
+db/
+testfiles/
+testsamples/
 
 # Backup files (sequences)
 *.bk??
@@ -71,7 +75,18 @@ GEMINI.md
 CLAUDE.md
 JULES.md
 SKILLS.md
-walkthrough.md
-implementation_plan.md
-code_review_report.md
+walkthrough*.md
+implementation_plan*.md
+code_review_report*.md
 tasks.md
+
+# Code Review tooling
+repomix-output.xml
+repomix-output.md
+repomix-instruction.md
+.repomixignore
+repomix.config.json
+
+
+# --- Vendor / Local Assets ---
+**/mermaid.min.js
